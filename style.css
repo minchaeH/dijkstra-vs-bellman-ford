@@ -449,3 +449,10 @@ aside { width: 390px; gap: 12px; }
 
 /* 꽃 버튼 가운데 정렬 (block 요소라 text-align이 안 먹던 문제) */
 .flower { display: grid; place-items: center; margin-left: auto; margin-right: auto; }
+
+/* 핵심 코드: 옆으로 스크롤 없이 줄바꿈해서 전부 보이게 */
+aside { width: 430px; padding: 14px; gap: 10px; }
+.panel-box { padding: 12px; }
+.code-box { overflow: visible; font-size: 11px; line-height: 1.6; }
+.code-line { white-space: pre-wrap; overflow-wrap: anywhere; }
+.structure-box { overflow-wrap: anywhere; }
