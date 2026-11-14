@@ -1,8 +1,20 @@
-// 1. 실사 배경 에셋 로드 (같은 폴더의 pond_bg.png, ending.png)
+
+// 실사 배경 이미지 로드
 const bgImage = new Image();
 let bgLoaded = false;
-bgImage.onload = () => { bgLoaded = true; };
-bgImage.src = 'pond_bg.png';
+
+bgImage.onload = () => {
+    bgLoaded = true;
+    console.log('연못 배경 이미지 로드 성공!');
+};
+
+bgImage.onerror = () => {
+    bgLoaded = false;
+    console.error('pond_bg.png 로드 실패! 이미지 경로와 파일명을 확인하세요.');
+};
+
+bgImage.src = new URL('./pond_bg.png', document.baseURI).href;
+
 
 // 8개 정점 좌표 (실사 탑뷰 연못 구도에 자연스럽게 배치)
 const NODES = [
@@ -105,7 +117,7 @@ function buildDijkstraSteps() {
         pq: [...pq],
         isEnding: true,
         tag: '목적지 도달 완료',
-        what: `목표 연꽃 'End'의 최단 거리가 ${dist['End']}로 확정되어 반투명 소녀의 손바닥에 도달합니다.`,
+        what: `목표 연꽃 'End'의 최단 거리가 ${dist['End']}로 확정되어 개구리가 도착합니다.`,
         why: `경로 역추적(prev): Start → A(2) → C(4) → B(5) → E(6) → F(7) → End(9). 탐색하지 않은 먼 경로까지 가지 않고도 최단 경로를 보장합니다.`
       });
       break;
@@ -426,11 +438,7 @@ function closeEnding() {
 function renderEndingFallback() {
   const img = document.getElementById('endingImg');
   const eCanvas = document.getElementById('endingCanvas');
-  if (img.complete && img.naturalWidth > 0) {
-    img.style.display = 'block';
-    eCanvas.style.display = 'none';
-    return;
-  }
+
   img.onload = () => {
     img.style.display = 'block';
     eCanvas.style.display = 'none';
@@ -451,58 +459,98 @@ function renderEndingFallback() {
     c.textAlign = 'center';
     c.fillText('같은 폴더에 ending.png (사선 앵글 이미지)를 넣으면 실사 엔딩이 표시됩니다.', w / 2, h / 2);
   };
+
+  // 이미 로드 완료된 경우 즉시 표시, 아니면 새로 로드 트리거
+  if (img.complete && img.naturalWidth > 0) {
+    img.style.display = 'block';
+    eCanvas.style.display = 'none';
+  } else {
+    img.src = 'ending.png';
+  }
 }
 
 // 실사 질감 연잎 & 광원 연꽃 그리기
 function drawRealisticLilyPad(x, y, radius, isConfirmed, isCandidate, now) {
   ctx.save();
 
-  // 1) 수면 아래 그림자 (입체감)
+  // 1~2) 연잎: 가장자리가 물결치는 타원형 + 한쪽이 갈라진 틈 + 방사형 주름
+  const seed = x * 0.0137 + y * 0.0211;
+  const notch = (seed * 5) % (Math.PI * 2); // 갈라진 틈 방향 (연잎마다 다름)
+  const gapHalf = 0.17;
+  const padPath = (scale, ox, oy) => {
+    ctx.beginPath();
+    ctx.moveTo(x + ox, y + oy);
+    const N = 80;
+    for (let i = 0; i <= N; i++) {
+      const th = notch + gapHalf + (i / N) * (Math.PI * 2 - gapHalf * 2);
+      const ruffle = 1 + 0.05 * Math.sin(th * 9 + seed * 7) + 0.028 * Math.sin(th * 15 + seed * 3);
+      const rr = radius * scale * ruffle;
+      ctx.lineTo(x + ox + Math.cos(th) * rr * 1.1, y + oy + Math.sin(th) * rr * 0.92);
+    }
+    ctx.closePath();
+  };
+  const pt = (ang, rad, off = 0) => [
+    x + Math.cos(ang) * rad * 1.1 - Math.sin(ang) * off,
+    y + Math.sin(ang) * rad * 0.92 + Math.cos(ang) * off
+  ];
+
+  // 수면 그림자
   ctx.fillStyle = 'rgba(2, 6, 15, 0.68)';
-  ctx.beginPath();
-  ctx.arc(x + 4, y + 6, radius * 1.03, 0, Math.PI * 2);
+  padPath(1.03, 4, 6);
   ctx.fill();
 
-  // 2) 푸른빛 잎맥을 가진 사실적인 연잎 본체 (실사 배경 없을 때도 입체 렌더링)
-  if (!bgLoaded) {
-    const padGrad = ctx.createRadialGradient(x - radius * 0.2, y - radius * 0.2, 3, x, y, radius);
-    padGrad.addColorStop(0, '#2a6f7f');
-    padGrad.addColorStop(0.55, '#194754');
-    padGrad.addColorStop(0.92, '#10303b');
-    padGrad.addColorStop(1, '#3b8b9c');
+  // 잎 본체 그라데이션
+  const padGrad = ctx.createRadialGradient(x - radius * 0.25, y - radius * 0.25, 3, x, y, radius * 1.1);
+  padGrad.addColorStop(0, '#3a8a7a');
+  padGrad.addColorStop(0.6, '#236457');
+  padGrad.addColorStop(1, '#14423f');
+  ctx.fillStyle = padGrad;
+  padPath(1, 0, 0);
+  ctx.fill();
 
-    ctx.fillStyle = padGrad;
+  // 주름(잎맥): 어두운 골 + 밝은 능선을 번갈아 곡선으로 그림
+  ctx.save();
+  padPath(1, 0, 0);
+  ctx.clip();
+  const VEINS = 20;
+  for (let v = 0; v < VEINS; v++) {
+    const ang = notch + gapHalf + ((v + 0.5) * (Math.PI * 2 - gapHalf * 2)) / VEINS;
+    const sway = (v % 2 ? 1 : -1) * 0.14;
+    const a0 = pt(ang, radius * 0.1);
+    const c1 = pt(ang + sway, radius * 0.55);
+    const a1 = pt(ang, radius * 1.02);
     ctx.beginPath();
-    ctx.arc(x, y, radius, 0.18, Math.PI * 2 - 0.14);
-    ctx.lineTo(x, y);
-    ctx.closePath();
-    ctx.fill();
-
-    // 방사형 잎맥 디테일
-    ctx.strokeStyle = 'rgba(125, 211, 252, 0.22)';
-    ctx.lineWidth = 0.9;
-    for (let v = 0; v < 14; v++) {
-      const ang = 0.3 + (v * (Math.PI * 2 - 0.5)) / 14;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.quadraticCurveTo(
-        x + Math.cos(ang + 0.08) * radius * 0.5,
-        y + Math.sin(ang + 0.08) * radius * 0.5,
-        x + Math.cos(ang) * radius * 0.94,
-        y + Math.sin(ang) * radius * 0.94
-      );
-      ctx.stroke();
-    }
-  } else {
-    // 실사 배경(pond_bg.png) 위에서는 반투명 잎맥 하이라이트만 은은하게 겹침
-    const rimGrad = ctx.createRadialGradient(x, y, radius * 0.4, x, y, radius);
-    rimGrad.addColorStop(0, 'rgba(30, 80, 95, 0.25)');
-    rimGrad.addColorStop(1, 'rgba(103, 232, 249, 0.32)');
-    ctx.fillStyle = rimGrad;
+    ctx.moveTo(a0[0], a0[1]);
+    ctx.quadraticCurveTo(c1[0], c1[1], a1[0], a1[1]);
+    ctx.strokeStyle = 'rgba(4, 28, 30, 0.5)';
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+    // 밝은 능선(골 바로 옆)
+    const b0 = pt(ang, radius * 0.1, 1.6);
+    const b1 = pt(ang + sway, radius * 0.55, 1.6);
+    const b2 = pt(ang, radius * 1.02, 1.6);
     ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(b0[0], b0[1]);
+    ctx.quadraticCurveTo(b1[0], b1[1], b2[0], b2[1]);
+    ctx.strokeStyle = 'rgba(170, 245, 225, 0.2)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
+  // 가운데 배꼽
+  const nv = ctx.createRadialGradient(x, y, 0, x, y, radius * 0.2);
+  nv.addColorStop(0, 'rgba(8, 40, 38, 0.65)');
+  nv.addColorStop(1, 'rgba(8, 40, 38, 0)');
+  ctx.fillStyle = nv;
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // 가장자리 하이라이트
+  padPath(1, 0, 0);
+  ctx.strokeStyle = 'rgba(150, 235, 225, 0.5)';
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
 
   // 3) 연꽃 발광 블룸(Bloom) & 다층 꽃잎
   if (isConfirmed) {
@@ -775,7 +823,7 @@ function draw(now = 0) {
     const isCandidate = (st.discovered.has(n.id) && !isConfirmed && n.id !== 'Start') || st.relaxedNode === n.id;
 
     if (n.type !== 'bank-left') {
-      drawRealisticLilyPad(p.x, p.y, 30, isConfirmed, isCandidate, now);
+      drawRealisticLilyPad(p.x, p.y, 38, isConfirmed, isCandidate, now);
     }
 
     // 정점 이름 + 거리 반투명 알약 배지
@@ -786,7 +834,7 @@ function draw(now = 0) {
 
     ctx.fillStyle = 'rgba(4, 9, 20, 0.82)';
     ctx.beginPath();
-    ctx.roundRect(p.x - tw / 2, p.y + 34, tw, 20, 10);
+    ctx.roundRect(p.x - tw / 2, p.y + 42, tw, 20, 10);
     ctx.fill();
     ctx.strokeStyle = isConfirmed ? 'rgba(244, 114, 182, 0.6)' : 'rgba(148, 163, 184, 0.25)';
     ctx.lineWidth = 1;
@@ -795,7 +843,7 @@ function draw(now = 0) {
     ctx.fillStyle = '#f8fafc';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(labelText, p.x, p.y + 44);
+    ctx.fillText(labelText, p.x, p.y + 52);
   });
 
   // 5) 오른쪽 끝 반투명 소녀 발광체 (실사 배경 없을 때 표시)
